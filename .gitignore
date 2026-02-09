@@ -1,0 +1,13 @@
+# Auth tokens - NEVER commit these
+.appie.json
+
+# User-specific files
+config.json
+taste-profile.md
+meal-history.json
+
+# Build artifacts
+appie-cli/appie-cli
+
+# OS
+.DS_Store
