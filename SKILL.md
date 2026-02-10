@@ -246,7 +246,7 @@ Example:
 Use `batch-add` to add all items in a single call instead of individual `add-to-list` calls. Build a JSON array with all products and free text items, then pipe it to stdin:
 
 ```bash
-echo '[{"id": 563724, "qty": 1}, {"id": 4160, "qty": 1}, {"text": "🥩 Slager: kipfilet (voor courgetteschotel)", "qty": 1}]' | appie-cli batch-add
+echo '[{"id": 54074, "qty": 1}, {"id": 197393, "qty": 1}, {"id": 30851, "qty": 2}]' | appie-cli batch-add
 ```
 
 Each item is either `{"id": <product-id>, "qty": N}` for AH products or `{"text": "description", "qty": N}` for free text (butcher items, notes). This is much faster than calling `add-to-list` for each item individually.
