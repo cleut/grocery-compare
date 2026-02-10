@@ -116,10 +116,12 @@ Thursday morning (cron job):
   │   └── Dislike/allergy filters
   ├── Propose N meals via chat
   ├── Wait for approval/modifications
-  └── Add all items to AH shopping list
+  └── Add all items to AH shopping list (via batch-add)
+      ├── Look up product IDs from product-cache.json first
       ├── Weekly basics (from favorite lists)
       ├── Meal ingredients (with product IDs)
-      └── Butcher items (as free text notes)
+      ├── Butcher items (as free text notes)
+      └── Cache any newly discovered product IDs
 ```
 
 ## CLI Reference
@@ -143,6 +145,7 @@ Shopping List:
   list-items <list-id>         Get items in a specific list
   add-to-list <id> [qty]       Add product to shopping list
   add-to-list --text "item"    Add free text item
+  batch-add                    Add multiple items from stdin (JSON array)
   clear-list                   Clear shopping list
 
 Account:

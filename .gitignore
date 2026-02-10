@@ -5,6 +5,8 @@
 config.json
 taste-profile.md
 meal-history.json
+product-cache.json
+product-cache.json
 
 # Build artifacts
 appie-cli/appie-cli

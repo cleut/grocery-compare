@@ -160,6 +160,37 @@ func main() {
 		}
 		fmt.Println(`{"ok": true}`)
 
+	case "batch-add":
+		// Reads JSON array from stdin: [{"id": 123, "qty": 2}, {"text": "free text", "qty": 1}]
+		client := mustAuth(ctx, configPath)
+		var batchItems []struct {
+			ID   int    `json:"id"`
+			Text string `json:"text"`
+			Qty  int    `json:"qty"`
+		}
+		if err := json.NewDecoder(os.Stdin).Decode(&batchItems); err != nil {
+			fatal("Invalid JSON input: %v", err)
+		}
+		items := make([]appie.ListItem, 0, len(batchItems))
+		for _, b := range batchItems {
+			qty := b.Qty
+			if qty < 1 {
+				qty = 1
+			}
+			if b.Text != "" {
+				items = append(items, appie.ListItem{Name: b.Text, Quantity: qty})
+			} else if b.ID > 0 {
+				items = append(items, appie.ListItem{ProductID: b.ID, Quantity: qty})
+			}
+		}
+		if len(items) == 0 {
+			fatal("No valid items in input")
+		}
+		if err := client.AddToShoppingList(ctx, items); err != nil {
+			fatal("Batch add failed: %v", err)
+		}
+		fmt.Printf(`{"ok": true, "added": %d}`+"\n", len(items))
+
 	case "clear-list":
 		client := mustAuth(ctx, configPath)
 		if err := client.ClearShoppingList(ctx); err != nil {
@@ -258,6 +289,7 @@ func printUsage() {
 		"shopping-lists         List all shopping lists",
 		"add-to-list <id> [qty] Add product to shopping list",
 		"add-to-list --text \"item\" [qty]  Add free text item",
+		"batch-add              Add multiple items from stdin (JSON array)",
 		"clear-list             Clear shopping list",
 		"order                  Show current order",
 		"add-to-order <id> [qty] Add product to order",

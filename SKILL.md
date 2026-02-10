@@ -210,6 +210,9 @@ Send meal suggestions via chat. For each meal include:
 
 ### 6. Fill Shopping List
 
+#### Product cache
+Before searching for a product, check `product-cache.json` first. It maps product names to AH product IDs so you can skip repeated searches. After finding a new product ID via search, add it to the cache under the appropriate section (`basics` or `ingredients`).
+
 Before adding items, do these checks:
 
 #### Butcher check
@@ -240,12 +243,18 @@ Example:
 - Recipe A needs knoflook, Recipe B needs knoflook → 1 knoflook is enough (add 1x)
 
 #### Then add to list
-```bash
-# Add product by AH product ID (with correct quantity!)
-appie-cli add-to-list <product-id> [quantity]
+Use `batch-add` to add all items in a single call instead of individual `add-to-list` calls. Build a JSON array with all products and free text items, then pipe it to stdin:
 
-# Add butcher/external items as free text
-appie-cli add-to-list --text "🥩 Slager: kipfilet (voor courgetteschotel)" 1
+```bash
+echo '[{"id": 563724, "qty": 1}, {"id": 4160, "qty": 1}, {"text": "🥩 Slager: kipfilet (voor courgetteschotel)", "qty": 1}]' | appie-cli batch-add
+```
+
+Each item is either `{"id": <product-id>, "qty": N}` for AH products or `{"text": "description", "qty": N}` for free text (butcher items, notes). This is much faster than calling `add-to-list` for each item individually.
+
+You can still use `add-to-list` for single items:
+```bash
+appie-cli add-to-list <product-id> [quantity]
+appie-cli add-to-list --text "🥩 Slager: kipfilet" 1
 ```
 
 For **verspakketten** (meal kits): find the matching Allerhande recipe, get the full ingredient list, subtract what's in the kit, add only the missing items.
@@ -267,6 +276,7 @@ After filling the list, save the approved meals to `meal-history.json` with date
 | `list-items <list-id>` | Items in specific list | Yes |
 | `add-to-list <id> [qty]` | Add product to list | Yes |
 | `add-to-list --text "item"` | Add free text to list | Yes |
+| `batch-add` | Add multiple items from stdin (JSON) | Yes |
 | `clear-list` | Clear shopping list | Yes |
 | `member` | Member profile | Yes |
 | `receipts` | Purchase receipts | Yes |
@@ -298,8 +308,9 @@ After filling the list, save the approved meals to `meal-history.json` with date
 ## Files
 - `config.json` — user preferences (copy from `config-template.json`)
 - `taste-profile.md` — learned taste profile (copy from `taste-profile-template.md`)
-- `meal-history.json` — meal approvals/rejections (copy from `meal-history-template.json`)
-- `.appie.json` — AH auth tokens (auto-created on login, DO NOT commit)
+- `meal-history.json` -- meal approvals/rejections (copy from `meal-history-template.json`)
+- `product-cache.json` -- cached product IDs to skip repeated searches (copy from `product-cache-template.json`)
+- `.appie.json` -- AH auth tokens (auto-created on login, DO NOT commit)
 
 ## Known Issues
 
