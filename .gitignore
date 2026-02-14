@@ -11,5 +11,8 @@ product-cache.json
 # Build artifacts
 appie-cli/appie-cli
 
+# Analysis output
+analyse-snellere-flow.md
+
 # OS
 .DS_Store
