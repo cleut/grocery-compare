@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	appie "github.com/gwillem/appie-go"
 )
@@ -31,6 +34,60 @@ func main() {
 	cmd := os.Args[1]
 
 	switch cmd {
+	case "login":
+		client := appie.New(appie.WithConfigPath(configPath))
+		loginURL := client.LoginURL()
+
+		// Start local server to catch the code
+		codeCh := make(chan string, 1)
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			fatal("Could not start local server: %v", err)
+		}
+		port := listener.Addr().(*net.TCPAddr).Port
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprintf(w, loginPage, loginURL, port)
+		})
+		mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+			code := r.URL.Query().Get("code")
+			if code == "" {
+				http.Error(w, "Missing code", 400)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, successPage)
+			codeCh <- code
+		})
+
+		srv := &http.Server{Handler: mux}
+		go srv.Serve(listener)
+
+		fmt.Fprintf(os.Stderr, "Login server running on http://127.0.0.1:%d\n", port)
+		fmt.Fprintf(os.Stderr, "Send this URL to the user: http://127.0.0.1:%d\n", port)
+		fmt.Fprintf(os.Stderr, "Waiting for login...\n")
+
+		// Also output machine-readable JSON
+		fmt.Printf(`{"login_url": "http://127.0.0.1:%d", "status": "waiting"}`+"\n", port)
+
+		// Wait for code with timeout
+		select {
+		case code := <-codeCh:
+			srv.Shutdown(ctx)
+			if err := client.ExchangeCode(ctx, code); err != nil {
+				fatal("Exchange failed: %v", err)
+			}
+			if err := client.SaveConfig(); err != nil {
+				fatal("Save config failed: %v", err)
+			}
+			fmt.Println(`{"ok": true, "message": "Login successful"}`)
+		case <-time.After(5 * time.Minute):
+			srv.Shutdown(ctx)
+			fatal("Login timed out after 5 minutes")
+		}
+
 	case "login-url":
 		client := appie.New(appie.WithConfigPath(configPath))
 		fmt.Println(client.LoginURL())
@@ -38,10 +95,12 @@ func main() {
 	case "exchange-code":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "Usage: appie-cli exchange-code <code>")
+			fmt.Fprintln(os.Stderr, "       appie-cli exchange-code \"appie://login-exit?code=XXXXX\"")
 			os.Exit(1)
 		}
 		client := appie.New(appie.WithConfigPath(configPath))
-		if err := client.ExchangeCode(ctx, os.Args[2]); err != nil {
+		code := extractCode(os.Args[2])
+		if err := client.ExchangeCode(ctx, code); err != nil {
 			fatal("Exchange failed: %v", err)
 		}
 		if err := client.SaveConfig(); err != nil {
@@ -268,6 +327,35 @@ func main() {
 		}
 		printJSON(products)
 
+	case "search-recipes":
+		client := mustAnon(ctx, configPath)
+		query := ""
+		if len(os.Args) >= 3 {
+			query = os.Args[2]
+		}
+		size := 10
+		if len(os.Args) >= 4 {
+			size, _ = strconv.Atoi(os.Args[3])
+		}
+		recipes, err := searchRecipes(ctx, client, query, size)
+		if err != nil {
+			fatal("Search recipes failed: %v", err)
+		}
+		printJSON(recipes)
+
+	case "recipe":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: appie-cli recipe <id>")
+			os.Exit(1)
+		}
+		client := mustAnon(ctx, configPath)
+		recipeID, _ := strconv.Atoi(os.Args[2])
+		recipe, err := getRecipe(ctx, client, recipeID)
+		if err != nil {
+			fatal("Get recipe failed: %v", err)
+		}
+		printJSON(recipe)
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		printUsage()
@@ -277,8 +365,9 @@ func main() {
 
 func printUsage() {
 	cmds := []string{
-		"login-url              Get the AH login URL",
-		"exchange-code <code>   Exchange auth code for tokens",
+		"login                  Login via local web page (easiest)",
+		"login-url              Get the AH login URL (manual)",
+		"exchange-code <code>   Exchange auth code or appie:// URL for tokens",
 		"member                 Show member profile",
 		"search <query> [n]     Search products",
 		"product <id>           Get product details",
@@ -293,6 +382,8 @@ func printUsage() {
 		"clear-list             Clear shopping list",
 		"order                  Show current order",
 		"add-to-order <id> [qty] Add product to order",
+		"search-recipes [query] [n] Search Allerhande recipes",
+		"recipe <id>            Get recipe with ingredients",
 	}
 	fmt.Fprintln(os.Stderr, "Usage: appie-cli <command> [args]")
 	fmt.Fprintln(os.Stderr, "")
@@ -421,6 +512,216 @@ func getBonusProducts(ctx context.Context, client *appie.Client, size int) (json
 		return nil, fmt.Errorf("API error: %d %s", resp.StatusCode, string(body))
 	}
 	return body, nil
+}
+
+// extractCode extracts the authorization code from either a bare code or a full appie:// URL
+func extractCode(input string) string {
+	input = strings.TrimSpace(input)
+	if strings.Contains(input, "code=") {
+		u, err := url.Parse(input)
+		if err == nil {
+			if c := u.Query().Get("code"); c != "" {
+				return c
+			}
+		}
+		// Fallback: extract code= from the string manually
+		parts := strings.SplitN(input, "code=", 2)
+		if len(parts) == 2 {
+			code := parts[1]
+			if idx := strings.Index(code, "&"); idx >= 0 {
+				code = code[:idx]
+			}
+			return code
+		}
+	}
+	return input
+}
+
+const loginPage = `<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<title>Albert Heijn Login</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 600px; margin: 60px auto; padding: 0 20px; background: #f5f5f5; }
+  .card { background: white; border-radius: 12px; padding: 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  h1 { color: #00811c; margin-top: 0; }
+  a.btn { display: inline-block; background: #00811c; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-size: 16px; margin: 16px 0; }
+  a.btn:hover { background: #006b17; }
+  .step { margin: 16px 0; padding: 12px; background: #f9f9f9; border-radius: 8px; }
+  .step-num { font-weight: bold; color: #00811c; }
+  input { width: 100%%; padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px; box-sizing: border-box; margin: 8px 0; }
+  button { background: #00811c; color: white; padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+  button:hover { background: #006b17; }
+  .manual { margin-top: 24px; padding-top: 24px; border-top: 1px solid #eee; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Albert Heijn Login</h1>
+  <div class="step">
+    <span class="step-num">Stap 1:</span> Open de login pagina en log in met je AH account.
+  </div>
+  <a class="btn" href="%s" target="_blank">Inloggen bij Albert Heijn</a>
+  <div class="step">
+    <span class="step-num">Stap 2:</span> Na het inloggen krijg je een foutmelding (de pagina kan niet worden geopend). Dat is normaal.
+    Kopieer de volledige URL uit je adresbalk. Die begint met <code>appie://login-exit?code=</code>
+  </div>
+  <div class="step">
+    <span class="step-num">Stap 3:</span> Plak de URL hieronder:
+  </div>
+  <form id="codeForm">
+    <input type="text" id="codeInput" placeholder="appie://login-exit?code=..." autofocus>
+    <button type="submit">Inloggen</button>
+  </form>
+  <p id="status"></p>
+</div>
+<script>
+document.getElementById('codeForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  var input = document.getElementById('codeInput').value.trim();
+  var code = input;
+  var match = input.match(/code=([^&]+)/);
+  if (match) code = match[1];
+  if (!code) { document.getElementById('status').textContent = 'Voer een code of URL in.'; return; }
+  document.getElementById('status').textContent = 'Bezig met inloggen...';
+  window.location.href = 'http://127.0.0.1:%d/callback?code=' + encodeURIComponent(code);
+});
+</script>
+</body>
+</html>`
+
+const successPage = `<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<title>Ingelogd!</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 600px; margin: 60px auto; padding: 0 20px; background: #f5f5f5; }
+  .card { background: white; border-radius: 12px; padding: 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); text-align: center; }
+  h1 { color: #00811c; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Ingelogd!</h1>
+  <p>Je bent succesvol ingelogd bij Albert Heijn. Je kunt dit venster sluiten.</p>
+</div>
+</body>
+</html>`
+
+// graphqlQuery executes a GraphQL query and returns the raw response body
+func graphqlQuery(ctx context.Context, client *appie.Client, query string) ([]byte, error) {
+	reqBody, _ := json.Marshal(map[string]string{"query": query})
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.ah.nl/graphql", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+client.AccessToken())
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-client-name", "appie-ios")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("API error: %d %s", resp.StatusCode, string(body))
+	}
+	return body, nil
+}
+
+// searchRecipes searches Allerhande recipes via GraphQL
+func searchRecipes(ctx context.Context, client *appie.Client, query string, size int) (json.RawMessage, error) {
+	gql := fmt.Sprintf(`{
+		recipeSearch(query: { query: %q, size: %d }) {
+			result {
+				id
+				title
+				slug
+				cookTime
+				images {
+					rendition { url }
+				}
+			}
+			page { totalElements totalPages }
+		}
+	}`, query, size)
+
+	body, err := graphqlQuery(ctx, client, gql)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Data struct {
+			RecipeSearch json.RawMessage `json:"recipeSearch"`
+		} `json:"data"`
+		Errors json.RawMessage `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse error: %w\nraw: %s", err, string(body))
+	}
+	if result.Errors != nil {
+		return nil, fmt.Errorf("GraphQL errors: %s", string(result.Errors))
+	}
+	return result.Data.RecipeSearch, nil
+}
+
+// getRecipe fetches a single recipe with full details via GraphQL
+func getRecipe(ctx context.Context, client *appie.Client, id int) (json.RawMessage, error) {
+	gql := fmt.Sprintf(`{
+		recipe(id: %d) {
+			id
+			title
+			slug
+			description
+			cookTime
+			prepTime
+			servings
+			tags
+			ingredients {
+				text
+				quantity
+				name { singular plural }
+				unit { singular plural }
+			}
+			steps {
+				text
+				index
+			}
+			nutritions {
+				name
+				value
+				unit
+			}
+			images {
+				rendition { url }
+			}
+		}
+	}`, id)
+
+	body, err := graphqlQuery(ctx, client, gql)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Data struct {
+			Recipe json.RawMessage `json:"recipe"`
+		} `json:"data"`
+		Errors json.RawMessage `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse error: %w\nraw: %s", err, string(body))
+	}
+	if result.Errors != nil {
+		return nil, fmt.Errorf("GraphQL errors: %s", string(result.Errors))
+	}
+	return result.Data.Recipe, nil
 }
 
 func fatal(format string, args ...any) {

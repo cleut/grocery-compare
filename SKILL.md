@@ -44,35 +44,43 @@ This should return product results (no login required for search).
 
 ### Step 3: User Login (requires human interaction!)
 
-This is the critical step. The user must log in via their browser — you cannot do this for them.
+The user must log in via their browser. You cannot do this for them.
 
-1. Generate the login URL:
+**Easiest method: local login page**
+
+```bash
+appie-cli login
+```
+
+This starts a local web page. Send the URL (http://127.0.0.1:PORT) to the user. The page guides them through login with 3 simple steps:
+1. Click the login button to open AH login
+2. Log in with their AH account
+3. After the redirect fails (that's normal), paste the URL from their address bar into the form
+
+The CLI automatically exchanges the code and saves tokens. Done.
+
+**Manual method (fallback):**
+
+If the local server doesn't work (e.g. remote environments), use the manual flow:
+
 ```bash
 appie-cli login-url
 ```
 
-2. **Send this URL to the user** and explain the following:
-   - Open **Developer Tools** in your browser first (F12), go to the **Network** tab, and enable **Preserve log**
-   - Then open the login link and log in with your Albert Heijn account
-   - After login, the browser tries to redirect to `appie://login-exit?code=XXXXX` — this will fail with an error, **that's normal** (it's a mobile app link)
-   - In the Network tab, find **`ingelogd.json`**
-   - Click it → look at the **Response** tab — you'll see:
-     ```json
-     "pageProps": { "__N_REDIRECT": "appie://login-exit?code=XXXXX" }
-     ```
-   - Copy the code (everything after `code=`) and send it back to me
+Send the URL to the user. After login, the browser tries to redirect to `appie://login-exit?code=XXXXX` which fails. The user copies the full URL (or just the code) and sends it back. Then:
 
-3. Once the user gives you the code:
 ```bash
-appie-cli exchange-code <the-code-they-sent>
+# Both work: full URL or just the code
+appie-cli exchange-code "appie://login-exit?code=XXXXX"
+appie-cli exchange-code XXXXX
 ```
 
-4. Verify login worked:
+Verify login:
 ```bash
 appie-cli member
 ```
 
-This should show their member profile. Tokens are saved to `.appie.json` and auto-refresh — the user only needs to do this once.
+Tokens are saved to `.appie.json` and auto-refresh. The user only needs to do this once.
 
 ### Step 4: Configure preferences
 
@@ -98,26 +106,19 @@ cp config-template.json config.json
 
 The point is: **every household is different.** Don't assume — ask.
 
-### Step 4b: Set up shopping lists
+### Step 4b: Set up weekly basics
 
-The user's AH account has shopping lists. Fetch them:
 ```bash
-appie-cli shopping-lists
+cp weekly-basics-template.json weekly-basics.json
 ```
 
-This returns all lists with their IDs and names. Ask the user which lists they use for recurring items (e.g. weekly basics, biweekly household items). Save the list IDs in `config.json` under `favorite_lists`:
+Ask the user what they buy every week (melk, brood, eieren, fruit, etc.) and what they buy om de week (schoonmaakmiddel, tandpasta, etc.). Search for each product to find the AH product ID:
 
-```json
-"favorite_lists": {
-  "weekly": {
-    "id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-    "name": "Wekelijks",
-    "frequency": "weekly"
-  }
-}
+```bash
+appie-cli search "halfvolle melk" 3
 ```
 
-Tip: suggest the user creates named lists in the Appie app for their recurring items (e.g. "Wekelijks", "Tweewekelijks"). The agent can then read these lists each week and automatically add those basics to the shopping list.
+Fill `weekly-basics.json` with the product IDs, names and quantities. This file is the single source of truth for recurring items. No AH shopping lists needed.
 
 ### Step 5: Show the user what AH knows about them
 
@@ -162,29 +163,23 @@ appie-cli bonus-products 200
 
 # Get user's purchase history (for matching)
 appie-cli previously-bought 100 0
-
-# Get existing shopping list items
-appie-cli shopping-list
 ```
+
+Also read `weekly-basics.json` to know what recurring items to add later.
 
 ### 2. Find Bonus Matches
 Cross-reference bonus products with previously bought items (`isPreviouslyBought: true`). These are deals the user actually cares about.
 
 ### 3. Search Recipes
-Use the Allerhande recipe API via GraphQL:
-
 ```bash
-# Search recipes (via appie-cli or direct GraphQL)
-appie-cli search-recipes 20
-```
+# Search recipes by keyword
+appie-cli search-recipes "pasta" 20
 
-Or via GraphQL directly:
-```graphql
-{ recipeSearch(query: { size: 50 }) { result { id title slug } } }
-{ recipe(id: <id>) {
-    id title description cookTime
-    ingredients { text quantity name { singular } }
-} }
+# Or browse without query (returns popular recipes)
+appie-cli search-recipes "" 20
+
+# Get full recipe details with ingredients
+appie-cli recipe <recipe-id>
 ```
 
 Filter recipes by:
@@ -243,21 +238,13 @@ Example:
 - Recipe A needs knoflook, Recipe B needs knoflook → 1 knoflook is enough (add 1x)
 
 #### Then add to list
-Use `batch-add` to add all items in a single call instead of individual `add-to-list` calls. Build a JSON array with all products and free text items, then pipe it to stdin:
+Combine weekly basics (from `weekly-basics.json`) and meal ingredients into one `batch-add` call:
 
 ```bash
-echo '[{"id": 54074, "qty": 1}, {"id": 197393, "qty": 1}, {"id": 30851, "qty": 2}]' | appie-cli batch-add
+echo '[{"id": 54074, "qty": 1}, {"id": 197393, "qty": 1}, {"text": "Slager: kipfilet", "qty": 1}]' | appie-cli batch-add
 ```
 
-Each item is either `{"id": <product-id>, "qty": N}` for AH products or `{"text": "description", "qty": N}` for free text (butcher items, notes). This is much faster than calling `add-to-list` for each item individually.
-
-You can still use `add-to-list` for single items:
-```bash
-appie-cli add-to-list <product-id> [quantity]
-appie-cli add-to-list --text "🥩 Slager: kipfilet" 1
-```
-
-For **verspakketten** (meal kits): find the matching Allerhande recipe, get the full ingredient list, subtract what's in the kit, add only the missing items.
+Each item is either `{"id": <product-id>, "qty": N}` for AH products or `{"text": "description", "qty": N}` for free text (butcher items, notes). Include the basics from `weekly-basics.json` in the same batch. One call, everything at once.
 
 #### Save the recipes
 After filling the list, save the approved meals to `meal-history.json` with date, recipe name, ingredients, cooking time, and any notes. Also save rejected meals with the reason — this helps improve future suggestions.
@@ -278,9 +265,11 @@ After filling the list, save the approved meals to `meal-history.json` with date
 | `add-to-list --text "item"` | Add free text to list | Yes |
 | `batch-add` | Add multiple items from stdin (JSON) | Yes |
 | `clear-list` | Clear shopping list | Yes |
+| `search-recipes [query] [limit]` | Search Allerhande recipes | No |
+| `recipe <id>` | Recipe with full ingredients | No |
 | `member` | Member profile | Yes |
-| `receipts` | Purchase receipts | Yes |
-| `receipt <id>` | Receipt details | Yes |
+| `receipts` | Purchase receipts (broken, 503) | Yes |
+| `receipt <id>` | Receipt details (broken, 503) | Yes |
 
 ### GraphQL Discoveries
 
@@ -306,8 +295,9 @@ After filling the list, save the approved meals to `meal-history.json` with date
 ```
 
 ## Files
-- `config.json` — user preferences (copy from `config-template.json`)
-- `taste-profile.md` — learned taste profile (copy from `taste-profile-template.md`)
+- `config.json` -- user preferences (copy from `config-template.json`)
+- `weekly-basics.json` -- recurring grocery items with product IDs (copy from `weekly-basics-template.json`)
+- `taste-profile.md` -- learned taste profile (copy from `taste-profile-template.md`)
 - `meal-history.json` -- meal approvals/rejections (copy from `meal-history-template.json`)
 - `product-cache.json` -- cached product IDs to skip repeated searches (copy from `product-cache-template.json`)
 - `.appie.json` -- AH auth tokens (auto-created on login, DO NOT commit)
