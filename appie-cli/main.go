@@ -268,6 +268,35 @@ func main() {
 		}
 		printJSON(products)
 
+	case "search-recipes":
+		client := mustAnon(ctx, configPath)
+		query := ""
+		if len(os.Args) >= 3 {
+			query = os.Args[2]
+		}
+		size := 10
+		if len(os.Args) >= 4 {
+			size, _ = strconv.Atoi(os.Args[3])
+		}
+		recipes, err := searchRecipes(ctx, client, query, size)
+		if err != nil {
+			fatal("Search recipes failed: %v", err)
+		}
+		printJSON(recipes)
+
+	case "recipe":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: appie-cli recipe <id>")
+			os.Exit(1)
+		}
+		client := mustAnon(ctx, configPath)
+		recipeID, _ := strconv.Atoi(os.Args[2])
+		recipe, err := getRecipe(ctx, client, recipeID)
+		if err != nil {
+			fatal("Get recipe failed: %v", err)
+		}
+		printJSON(recipe)
+
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
 		printUsage()
@@ -293,6 +322,8 @@ func printUsage() {
 		"clear-list             Clear shopping list",
 		"order                  Show current order",
 		"add-to-order <id> [qty] Add product to order",
+		"search-recipes [query] [n] Search Allerhande recipes",
+		"recipe <id>            Get recipe with ingredients",
 	}
 	fmt.Fprintln(os.Stderr, "Usage: appie-cli <command> [args]")
 	fmt.Fprintln(os.Stderr, "")
@@ -421,6 +452,120 @@ func getBonusProducts(ctx context.Context, client *appie.Client, size int) (json
 		return nil, fmt.Errorf("API error: %d %s", resp.StatusCode, string(body))
 	}
 	return body, nil
+}
+
+// graphqlQuery executes a GraphQL query and returns the raw response body
+func graphqlQuery(ctx context.Context, client *appie.Client, query string) ([]byte, error) {
+	reqBody, _ := json.Marshal(map[string]string{"query": query})
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.ah.nl/graphql", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+client.AccessToken())
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-client-name", "appie-ios")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("API error: %d %s", resp.StatusCode, string(body))
+	}
+	return body, nil
+}
+
+// searchRecipes searches Allerhande recipes via GraphQL
+func searchRecipes(ctx context.Context, client *appie.Client, query string, size int) (json.RawMessage, error) {
+	gql := fmt.Sprintf(`{
+		recipeSearch(query: { query: %q, size: %d }) {
+			result {
+				id
+				title
+				slug
+				cookTime
+				images {
+					rendition { url }
+				}
+			}
+			page { totalElements totalPages }
+		}
+	}`, query, size)
+
+	body, err := graphqlQuery(ctx, client, gql)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Data struct {
+			RecipeSearch json.RawMessage `json:"recipeSearch"`
+		} `json:"data"`
+		Errors json.RawMessage `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse error: %w\nraw: %s", err, string(body))
+	}
+	if result.Errors != nil {
+		return nil, fmt.Errorf("GraphQL errors: %s", string(result.Errors))
+	}
+	return result.Data.RecipeSearch, nil
+}
+
+// getRecipe fetches a single recipe with full details via GraphQL
+func getRecipe(ctx context.Context, client *appie.Client, id int) (json.RawMessage, error) {
+	gql := fmt.Sprintf(`{
+		recipe(id: %d) {
+			id
+			title
+			slug
+			description
+			cookTime
+			prepTime
+			servings
+			tags
+			ingredients {
+				text
+				quantity
+				name { singular plural }
+				unit { singular plural }
+			}
+			steps {
+				text
+				index
+			}
+			nutritions {
+				name
+				value
+				unit
+			}
+			images {
+				rendition { url }
+			}
+		}
+	}`, id)
+
+	body, err := graphqlQuery(ctx, client, gql)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Data struct {
+			Recipe json.RawMessage `json:"recipe"`
+		} `json:"data"`
+		Errors json.RawMessage `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("parse error: %w\nraw: %s", err, string(body))
+	}
+	if result.Errors != nil {
+		return nil, fmt.Errorf("GraphQL errors: %s", string(result.Errors))
+	}
+	return result.Data.Recipe, nil
 }
 
 func fatal(format string, args ...any) {
