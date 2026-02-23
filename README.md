@@ -1,21 +1,21 @@
-# OpenClaw Skill: Albert Heijn
+# OpenClaw Skill: Grocery Compare (Albert Heijn + Picnic)
 
 > Unofficial integration. Not affiliated with, endorsed by, or connected to Albert Heijn or Ahold Delhaize.
 
-This skill handles Albert Heijn product search, bonus-aware pricing, shopping-list updates, and cart updates.
-It now includes a native bridge script (`grocery-bridge.py`) that directly calls both `appie-cli` and `picnic-cli.mjs`.
+This skill compares Albert Heijn and Picnic for weekly groceries.
+It uses `grocery-bridge.py` to orchestrate both stores through `appie-cli` and your Picnic CLI script.
 
-It is intended to be used together with the Picnic skill so your agent can:
+Use it to:
 - add groceries to both carts during the week
 - compare both carts at checkout time
 - choose the cheaper app for final purchase
 
 ## What This Skill Does
 
-1. Login to AH via OAuth
-2. Search AH products and fetch product details
-3. Fetch AH bonus products and include bonus context in price comparison
-4. Add approved items to AH shopping list or AH order cart
+1. Connect to Albert Heijn and Picnic CLIs
+2. Match products across both stores with strict confidence rules
+3. Build both carts from one grocery intent list
+4. Compare checkout totals with AH bonus context and recommend where to buy
 
 Out of scope:
 - meal suggestions
@@ -50,16 +50,27 @@ appie-cli login-url
 appie-cli exchange-code <code-or-appie-url>
 ```
 
-### 3) Create local config files
+### 3) Login to Picnic
+
+```bash
+node /absolute/path/to/picnic/cli.js login <email> NL
+```
+
+### 4) Create local config file
 
 ```bash
 cp config-template.json config.json
+```
+
+Set `cli_paths.picnic_cli` in `config.json` to your local Picnic CLI script path (for example `cli.js` or `picnic-cli.mjs`).
+Tune strict matching behavior in `config.json` under `matching` (thresholds, score gap, cache TTL).
+
+Optional helper files (only if you use them):
+
+```bash
 cp weekly-basics-template.json weekly-basics.json
 cp product-cache-template.json product-cache.json
 ```
-
-Set `cli_paths.picnic_cli` in `config.json` to your local `picnic-cli.mjs` path.
-Tune strict matching behavior in `config.json` under `matching` (thresholds, score gap, cache TTL).
 
 ## Typical Combined Flow (Picnic + AH)
 
@@ -77,16 +88,16 @@ Phase 2: Checkout compare
 Example flow:
 
 ```bash
-python3 grocery-bridge.py --config config.json match-items --items-file items.json
-python3 grocery-bridge.py --config config.json add-both --items-file items.json --auto-match --yes
+python3 grocery-bridge.py --config config.json match-items --items-json '[{"name":"Halfvolle melk","qty":2},{"name":"Bananen","qty":1}]'
+python3 grocery-bridge.py --config config.json add-both --items-json '[{"name":"Halfvolle melk","qty":2},{"name":"Bananen","qty":1}]' --auto-match --yes
 python3 grocery-bridge.py --config config.json compare-checkout
 ```
 
-Agent-friendly flow (no temp files):
+File-based flow (optional):
 
 ```bash
-python3 grocery-bridge.py --config config.json match-items --items-json '[{"name":"Halfvolle melk","qty":2},{"name":"Bananen","qty":1}]'
-python3 grocery-bridge.py --config config.json add-both --items-json '[{"name":"Halfvolle melk","qty":2},{"name":"Bananen","qty":1}]' --auto-match --yes
+python3 grocery-bridge.py --config config.json match-items --items-file items.json
+python3 grocery-bridge.py --config config.json add-both --items-file items.json --auto-match --yes
 ```
 
 `items.json` example:
@@ -110,7 +121,7 @@ Global options:
   --config <path>              Config file (default: config.json)
   --appie-cli <path>           Override appie-cli path
   --node <path>                Override node path
-  --picnic-cli <path>          Override picnic-cli.mjs path
+  --picnic-cli <path>          Override Picnic CLI script path
 
 Commands:
   search-both <query> [--limit 5]              Search AH and Picnic
@@ -120,7 +131,7 @@ Commands:
   compare-checkout [--picnic-unit cents|eur]   Compare totals and recommend checkout app
 ```
 
-## appie-cli Commands
+## Advanced: appie-cli Commands (AH-only)
 
 ```text
 appie-cli <command> [args]
@@ -161,7 +172,7 @@ Order (Cart):
 - match cache is stored in `match-cache.json` (ignored by git)
 - final checkout/payment for Picnic is done in the Picnic app
 - `grocery-bridge.py` is the native integration layer for Picnic + Albert Heijn
-- `checkout-compare.py` compares AH order JSON and Picnic cart JSON at checkout time
+- `checkout-compare.py` is an optional file-based compare helper
 
 ## License
 

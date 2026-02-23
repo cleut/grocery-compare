@@ -10,7 +10,7 @@
   "cli_paths": {
     "appie_cli": "appie-cli",
     "node": "node",
-    "picnic_cli": "/absolute/path/to/picnic-cli.mjs"
+    "picnic_cli": "/absolute/path/to/picnic/cli.js"
   },
   "picnic": {
     "price_unit": "cents"
