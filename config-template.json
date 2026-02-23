@@ -7,6 +7,14 @@
     "prefer_cheapest_total": true,
     "allow_split_order": true
   },
+  "cli_paths": {
+    "appie_cli": "appie-cli",
+    "node": "node",
+    "picnic_cli": "/absolute/path/to/picnic-cli.mjs"
+  },
+  "picnic": {
+    "price_unit": "cents"
+  },
   "store_overrides": {
     "always_ah": [],
     "always_picnic": []

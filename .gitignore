@@ -8,6 +8,7 @@ product-cache.json
 
 # Build artifacts
 appie-cli/appie-cli
+__pycache__/
 
 # Analysis output
 analyse-snellere-flow.md

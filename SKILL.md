@@ -7,6 +7,7 @@ Albert Heijn companion skill focused on one job:
 3. Compare totals at checkout time and pick the cheaper app
 
 This skill is designed to work together with the Picnic skill.
+Use `grocery-bridge.py` as the default integration layer so workflows call both stores directly.
 
 ## Scope
 
@@ -101,7 +102,7 @@ Use `product-cache.json` first to avoid repeated searches.
 
 ### 3) Get Picnic candidates
 
-Use the Picnic skill commands (typically `search`, optionally `cart` for current state).
+Use `grocery-bridge.py search-both` to get AH and Picnic candidates in one call.
 
 ### 4) Match products for both stores
 
@@ -129,8 +130,8 @@ Albert Heijn:
 - For cart comparison and checkout planning, prefer the AH order cart:
 
 ```bash
-echo '[{"id": 12345, "qty": 2}]' | appie-cli batch-add-to-order
-appie-cli order
+python3 grocery-bridge.py --config config.json add-both --items-file items.json --yes
+python3 grocery-bridge.py --config config.json cart-both
 ```
 
 - For checklist-style planning, build one combined JSON batch and call:
@@ -140,25 +141,23 @@ appie-cli batch-add
 ```
 
 Picnic:
-- Add approved Picnic items using Picnic skill `add` commands
+- Items are added through the same `add-both` bridge command
 
 ### Phase 2) Compare at checkout
 
-Right before checkout, export both carts and compare totals:
+Right before checkout, fetch both carts and compare totals:
 
 ```bash
-appie-cli order > /tmp/ah-order.json
-node /path/to/picnic-cli.mjs cart > /tmp/picnic-cart.json
-python3 checkout-compare.py --ah /tmp/ah-order.json --picnic /tmp/picnic-cart.json
+python3 grocery-bridge.py --config config.json compare-checkout
 ```
 
-Use `--format json` when the result must be parsed by another agent/tool.
+Use `--include-carts` when the result must include raw cart payloads.
 
 ### 7) Verify
 
 - AH cart: `appie-cli order`
 - AH list: `appie-cli shopping-list`
-- Picnic: `cart`
+- Both carts: `python3 grocery-bridge.py --config config.json cart-both`
 - Confirm quantities and total estimates with user before final checkout
 
 ## PATH
@@ -168,6 +167,17 @@ Ensure Go and appie-cli are available:
 ```bash
 export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH
 ```
+
+Set `config.json` -> `cli_paths.picnic_cli` to the local path of `picnic-cli.mjs`.
+
+## API Reference (grocery-bridge)
+
+| Command | What it does |
+|---------|-------------|
+| `search-both <query> [--limit N]` | Search AH and Picnic in one call |
+| `add-both --items-file <file> --yes` | Add mapped items to both carts |
+| `cart-both` | Return both carts |
+| `compare-checkout [--picnic-unit cents|eur]` | Compare totals and recommend checkout app |
 
 ## API Reference (appie-cli)
 
@@ -195,6 +205,7 @@ export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH
 - `config.json` - behavior flags and store overrides (copy from `config-template.json`)
 - `weekly-basics.json` - recurring grocery items with AH product IDs
 - `product-cache.json` - cached product IDs for faster matching
+- `grocery-bridge.py` - native integration layer for AH + Picnic commands
 - `checkout-compare.py` - compare AH and Picnic cart totals for checkout decision
 - `.appie.json` - AH auth tokens (auto-created on login, never commit)
 

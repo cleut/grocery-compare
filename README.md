@@ -3,6 +3,7 @@
 > Unofficial integration. Not affiliated with, endorsed by, or connected to Albert Heijn or Ahold Delhaize.
 
 This skill handles Albert Heijn product search, bonus-aware pricing, shopping-list updates, and cart updates.
+It now includes a native bridge script (`grocery-bridge.py`) that directly calls both `appie-cli` and `picnic-cli.mjs`.
 
 It is intended to be used together with the Picnic skill so your agent can:
 - add groceries to both carts during the week
@@ -57,28 +58,55 @@ cp weekly-basics-template.json weekly-basics.json
 cp product-cache-template.json product-cache.json
 ```
 
+Set `cli_paths.picnic_cli` in `config.json` to your local `picnic-cli.mjs` path.
+
 ## Typical Combined Flow (Picnic + AH)
 
 Phase 1: Build carts
 1. User provides desired groceries
-2. Agent searches candidates in AH and Picnic
+2. Agent searches candidates in AH and Picnic (`grocery-bridge.py search-both`)
 3. User approves item matches
-4. Agent adds items to both carts (`appie-cli add-to-order` / `batch-add-to-order` and Picnic `add`)
+4. Agent adds items to both carts (`grocery-bridge.py add-both --yes`)
 
 Phase 2: Checkout compare
-1. Export cart snapshots right before checkout
-2. Run a totals comparison
+1. Fetch both carts and compare totals
+2. Review recommendation and savings
 3. User checks out in the cheaper app
 
-Example compare run:
+Example flow:
 
 ```bash
-appie-cli order > /tmp/ah-order.json
-node /path/to/picnic-cli.mjs cart > /tmp/picnic-cart.json
-python3 checkout-compare.py --ah /tmp/ah-order.json --picnic /tmp/picnic-cart.json
+python3 grocery-bridge.py --config config.json search-both "halfvolle melk" --limit 5
+python3 grocery-bridge.py --config config.json add-both --items-file items.json --yes
+python3 grocery-bridge.py --config config.json compare-checkout
 ```
 
-Use `--format json` for machine-readable output.
+`items.json` example:
+
+```json
+[
+  {"name": "Halfvolle melk", "ah_id": 54074, "picnic_id": "s1234567", "qty": 2},
+  {"name": "Bananen", "ah_id": 197393, "picnic_id": "s2345678", "qty": 1}
+]
+```
+
+## Bridge Commands
+
+```text
+python3 grocery-bridge.py [global options] <command>
+
+Global options:
+  --config <path>              Config file (default: config.json)
+  --appie-cli <path>           Override appie-cli path
+  --node <path>                Override node path
+  --picnic-cli <path>          Override picnic-cli.mjs path
+
+Commands:
+  search-both <query> [--limit 5]              Search AH and Picnic
+  add-both --items-file items.json [--yes]     Add products to both carts
+  cart-both                                    Fetch both carts
+  compare-checkout [--picnic-unit cents|eur]   Compare totals and recommend checkout app
+```
 
 ## appie-cli Commands
 
@@ -119,6 +147,7 @@ Order (Cart):
 - `bonus-products` can be used without login (anonymous token)
 - auth tokens are stored in `.appie.json` (ignored by git)
 - final checkout/payment for Picnic is done in the Picnic app
+- `grocery-bridge.py` is the native integration layer for Picnic + Albert Heijn
 - `checkout-compare.py` compares AH order JSON and Picnic cart JSON at checkout time
 
 ## License
