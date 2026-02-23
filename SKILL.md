@@ -112,7 +112,7 @@ For each requested item:
 - Compute effective AH price from `price.now`
 - Include AH bonus metadata (`isBonus`, `bonusMechanism`, `price.was`) in explanation
 
-If matching is ambiguous, present top options and ask the user to pick before adding.
+Matching is strict by default. If any item is low/medium confidence, treat it as unresolved and ask the user to pick before adding.
 
 ### 5) Present proposal (no mutations yet)
 
@@ -130,7 +130,8 @@ Albert Heijn:
 - For cart comparison and checkout planning, prefer the AH order cart:
 
 ```bash
-python3 grocery-bridge.py --config config.json add-both --items-file items.json --yes
+python3 grocery-bridge.py --config config.json match-items --items-file items.json
+python3 grocery-bridge.py --config config.json add-both --items-file items.json --auto-match --yes
 python3 grocery-bridge.py --config config.json cart-both
 ```
 
@@ -169,13 +170,15 @@ export PATH=$HOME/.local/go/bin:$HOME/go/bin:$PATH
 ```
 
 Set `config.json` -> `cli_paths.picnic_cli` to the local path of `picnic-cli.mjs`.
+Use `config.json` -> `matching` to tune strict match thresholds and cache TTL.
 
 ## API Reference (grocery-bridge)
 
 | Command | What it does |
 |---------|-------------|
 | `search-both <query> [--limit N]` | Search AH and Picnic in one call |
-| `add-both --items-file <file> --yes` | Add mapped items to both carts |
+| `match-items --items-file <file>` | Resolve plain names to AH/Picnic IDs with confidence |
+| `add-both --items-file <file> --auto-match --yes` | Add only when all items match with high confidence |
 | `cart-both` | Return both carts |
 | `compare-checkout [--picnic-unit cents|eur]` | Compare totals and recommend checkout app |
 
@@ -205,6 +208,7 @@ Set `config.json` -> `cli_paths.picnic_cli` to the local path of `picnic-cli.mjs
 - `config.json` - behavior flags and store overrides (copy from `config-template.json`)
 - `weekly-basics.json` - recurring grocery items with AH product IDs
 - `product-cache.json` - cached product IDs for faster matching
+- `match-cache.json` - cached cross-store matches for repeated groceries
 - `grocery-bridge.py` - native integration layer for AH + Picnic commands
 - `checkout-compare.py` - compare AH and Picnic cart totals for checkout decision
 - `.appie.json` - AH auth tokens (auto-created on login, never commit)

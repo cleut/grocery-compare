@@ -5,6 +5,7 @@
 config.json
 weekly-basics.json
 product-cache.json
+match-cache.json
 
 # Build artifacts
 appie-cli/appie-cli

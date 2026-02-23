@@ -59,14 +59,15 @@ cp product-cache-template.json product-cache.json
 ```
 
 Set `cli_paths.picnic_cli` in `config.json` to your local `picnic-cli.mjs` path.
+Tune strict matching behavior in `config.json` under `matching` (thresholds, score gap, cache TTL).
 
 ## Typical Combined Flow (Picnic + AH)
 
 Phase 1: Build carts
-1. User provides desired groceries
-2. Agent searches candidates in AH and Picnic (`grocery-bridge.py search-both`)
-3. User approves item matches
-4. Agent adds items to both carts (`grocery-bridge.py add-both --yes`)
+1. User provides desired groceries (plain names are allowed)
+2. Agent resolves matches with strict same-product logic (`grocery-bridge.py match-items`)
+3. User reviews low/medium confidence items
+4. Agent adds to both carts with auto-match (`grocery-bridge.py add-both --auto-match --yes`)
 
 Phase 2: Checkout compare
 1. Fetch both carts and compare totals
@@ -76,8 +77,8 @@ Phase 2: Checkout compare
 Example flow:
 
 ```bash
-python3 grocery-bridge.py --config config.json search-both "halfvolle melk" --limit 5
-python3 grocery-bridge.py --config config.json add-both --items-file items.json --yes
+python3 grocery-bridge.py --config config.json match-items --items-file items.json
+python3 grocery-bridge.py --config config.json add-both --items-file items.json --auto-match --yes
 python3 grocery-bridge.py --config config.json compare-checkout
 ```
 
@@ -85,10 +86,13 @@ python3 grocery-bridge.py --config config.json compare-checkout
 
 ```json
 [
-  {"name": "Halfvolle melk", "ah_id": 54074, "picnic_id": "s1234567", "qty": 2},
-  {"name": "Bananen", "ah_id": 197393, "picnic_id": "s2345678", "qty": 1}
+  {"name": "Halfvolle melk", "qty": 2},
+  {"name": "Bananen", "qty": 1},
+  {"name": "Coca-Cola Zero", "qty": 1, "ah_id": 216934, "picnic_id": "s998877"}
 ]
 ```
+
+`add-both --auto-match` is strict: if any item remains unresolved (low or medium confidence), it aborts all cart mutations.
 
 ## Bridge Commands
 
@@ -103,7 +107,8 @@ Global options:
 
 Commands:
   search-both <query> [--limit 5]              Search AH and Picnic
-  add-both --items-file items.json [--yes]     Add products to both carts
+  match-items --items-file items.json           Resolve item names to AH/Picnic product IDs
+  add-both --items-file items.json [--auto-match] [--yes]  Add products to both carts
   cart-both                                    Fetch both carts
   compare-checkout [--picnic-unit cents|eur]   Compare totals and recommend checkout app
 ```
@@ -146,6 +151,7 @@ Order (Cart):
 
 - `bonus-products` can be used without login (anonymous token)
 - auth tokens are stored in `.appie.json` (ignored by git)
+- match cache is stored in `match-cache.json` (ignored by git)
 - final checkout/payment for Picnic is done in the Picnic app
 - `grocery-bridge.py` is the native integration layer for Picnic + Albert Heijn
 - `checkout-compare.py` compares AH order JSON and Picnic cart JSON at checkout time
