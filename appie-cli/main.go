@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -108,14 +107,6 @@ func main() {
 		}
 		fmt.Println(`{"ok": true, "message": "Login successful"}`)
 
-	case "member":
-		client := mustAuth(ctx, configPath)
-		member, err := client.GetMember(ctx)
-		if err != nil {
-			fatal("Get member failed: %v", err)
-		}
-		printJSON(member)
-
 	case "search":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "Usage: appie-cli search <query> [limit]")
@@ -152,26 +143,6 @@ func main() {
 			fatal("Get bonus failed: %v", err)
 		}
 		printJSON(products)
-
-	case "receipts":
-		client := mustAuth(ctx, configPath)
-		receipts, err := client.GetReceipts(ctx)
-		if err != nil {
-			fatal("Get receipts failed: %v", err)
-		}
-		printJSON(receipts)
-
-	case "receipt":
-		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "Usage: appie-cli receipt <transaction-id>")
-			os.Exit(1)
-		}
-		client := mustAuth(ctx, configPath)
-		receipt, err := client.GetReceipt(ctx, os.Args[2])
-		if err != nil {
-			fatal("Get receipt failed: %v", err)
-		}
-		printJSON(receipt)
 
 	case "shopping-list":
 		client := mustAuth(ctx, configPath)
@@ -265,6 +236,14 @@ func main() {
 		}
 		printJSON(order)
 
+	case "order-summary":
+		client := mustAuth(ctx, configPath)
+		summary, err := client.GetOrderSummary(ctx)
+		if err != nil {
+			fatal("Get order summary failed: %v", err)
+		}
+		printJSON(summary)
+
 	case "add-to-order":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "Usage: appie-cli add-to-order <product-id> [quantity]")
@@ -281,6 +260,54 @@ func main() {
 		}
 		fmt.Println(`{"ok": true}`)
 
+	case "batch-add-to-order":
+		// Reads JSON array from stdin: [{"id": 123, "qty": 2}]
+		client := mustAuth(ctx, configPath)
+		var batchItems []struct {
+			ID  int `json:"id"`
+			Qty int `json:"qty"`
+		}
+		if err := json.NewDecoder(os.Stdin).Decode(&batchItems); err != nil {
+			fatal("Invalid JSON input: %v", err)
+		}
+		items := make([]appie.OrderItem, 0, len(batchItems))
+		for _, b := range batchItems {
+			if b.ID <= 0 {
+				continue
+			}
+			qty := b.Qty
+			if qty < 1 {
+				qty = 1
+			}
+			items = append(items, appie.OrderItem{ProductID: b.ID, Quantity: qty})
+		}
+		if len(items) == 0 {
+			fatal("No valid items in input")
+		}
+		if err := client.AddToOrder(ctx, items); err != nil {
+			fatal("Batch add to order failed: %v", err)
+		}
+		fmt.Printf(`{"ok": true, "added": %d}`+"\n", len(items))
+
+	case "remove-from-order":
+		if len(os.Args) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: appie-cli remove-from-order <product-id>")
+			os.Exit(1)
+		}
+		client := mustAuth(ctx, configPath)
+		id, _ := strconv.Atoi(os.Args[2])
+		if err := client.RemoveFromOrder(ctx, id); err != nil {
+			fatal("Remove from order failed: %v", err)
+		}
+		fmt.Println(`{"ok": true}`)
+
+	case "clear-order":
+		client := mustAuth(ctx, configPath)
+		if err := client.ClearOrder(ctx); err != nil {
+			fatal("Clear order failed: %v", err)
+		}
+		fmt.Println(`{"ok": true}`)
+
 	case "list-items":
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "Usage: appie-cli list-items <list-id>")
@@ -293,30 +320,8 @@ func main() {
 		}
 		printJSON(listItems)
 
-	case "previously-bought":
-		client := mustAuth(ctx, configPath)
-		size := 100
-		page := 0
-		if len(os.Args) >= 3 {
-			size, _ = strconv.Atoi(os.Args[2])
-		}
-		if len(os.Args) >= 4 {
-			page, _ = strconv.Atoi(os.Args[3])
-		}
-		products, total, err := getPreviouslyBought(ctx, client, size, page)
-		if err != nil {
-			fatal("Get previously bought failed: %v", err)
-		}
-		result := map[string]any{
-			"products":      products,
-			"totalElements": total,
-			"page":          page,
-			"size":          size,
-		}
-		printJSON(result)
-
 	case "bonus-products":
-		client := mustAuth(ctx, configPath)
+		client := mustAnon(ctx, configPath)
 		size := 50
 		if len(os.Args) >= 3 {
 			size, _ = strconv.Atoi(os.Args[2])
@@ -326,35 +331,6 @@ func main() {
 			fatal("Get bonus products failed: %v", err)
 		}
 		printJSON(products)
-
-	case "search-recipes":
-		client := mustAnon(ctx, configPath)
-		query := ""
-		if len(os.Args) >= 3 {
-			query = os.Args[2]
-		}
-		size := 10
-		if len(os.Args) >= 4 {
-			size, _ = strconv.Atoi(os.Args[3])
-		}
-		recipes, err := searchRecipes(ctx, client, query, size)
-		if err != nil {
-			fatal("Search recipes failed: %v", err)
-		}
-		printJSON(recipes)
-
-	case "recipe":
-		if len(os.Args) < 3 {
-			fmt.Fprintln(os.Stderr, "Usage: appie-cli recipe <id>")
-			os.Exit(1)
-		}
-		client := mustAnon(ctx, configPath)
-		recipeID, _ := strconv.Atoi(os.Args[2])
-		recipe, err := getRecipe(ctx, client, recipeID)
-		if err != nil {
-			fatal("Get recipe failed: %v", err)
-		}
-		printJSON(recipe)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", cmd)
@@ -368,22 +344,23 @@ func printUsage() {
 		"login                  Login via local web page (easiest)",
 		"login-url              Get the AH login URL (manual)",
 		"exchange-code <code>   Exchange auth code or appie:// URL for tokens",
-		"member                 Show member profile",
 		"search <query> [n]     Search products",
 		"product <id>           Get product details",
 		"bonus                  Get spotlight bonus products",
-		"receipts               List receipts (kassabonnen)",
-		"receipt <id>           Get receipt details",
+		"bonus-products [n]     Get current bonus products",
 		"shopping-list          Show shopping list",
 		"shopping-lists         List all shopping lists",
+		"list-items <list-id>   Show items in a specific list",
 		"add-to-list <id> [qty] Add product to shopping list",
 		"add-to-list --text \"item\" [qty]  Add free text item",
 		"batch-add              Add multiple items from stdin (JSON array)",
 		"clear-list             Clear shopping list",
-		"order                  Show current order",
-		"add-to-order <id> [qty] Add product to order",
-		"search-recipes [query] [n] Search Allerhande recipes",
-		"recipe <id>            Get recipe with ingredients",
+		"order                  Show current order (cart)",
+		"order-summary          Show current order totals",
+		"add-to-order <id> [qty] Add product to order (cart)",
+		"batch-add-to-order     Add multiple products to order (stdin JSON)",
+		"remove-from-order <id> Remove product from order (cart)",
+		"clear-order            Clear current order (cart)",
 	}
 	fmt.Fprintln(os.Stderr, "Usage: appie-cli <command> [args]")
 	fmt.Fprintln(os.Stderr, "")
@@ -399,11 +376,11 @@ func mustAuth(ctx context.Context, configPath string) *appie.Client {
 		// Try loading and refreshing
 		client = appie.New(appie.WithConfigPath(configPath))
 		if err := client.LoadConfig(); err != nil {
-			fatal("Not authenticated. Run: appie-cli login-url")
+			fatal("Not authenticated. Run: appie-cli login")
 		}
 	}
 	if !client.IsAuthenticated() {
-		fatal("Not authenticated. Run: appie-cli login-url")
+		fatal("Not authenticated. Run: appie-cli login")
 	}
 	return client
 }
@@ -450,43 +427,6 @@ func getListItems(ctx context.Context, client *appie.Client, listID string) (jso
 		return nil, fmt.Errorf("API error: %d %s", resp.StatusCode, string(body))
 	}
 	return body, nil
-}
-
-// getPreviouslyBought fetches previously bought products via GraphQL
-func getPreviouslyBought(ctx context.Context, client *appie.Client, size, page int) (json.RawMessage, int, error) {
-	query := fmt.Sprintf(`{ productSearch(input: { query: "" previouslyBought: true size: %d page: %d }) { products { id title brand category } page { totalElements totalPages } } }`, size, page)
-
-	reqBody, _ := json.Marshal(map[string]string{"query": query})
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.ah.nl/graphql", bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+client.AccessToken())
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-client-name", "appie-ios")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-
-	var result struct {
-		Data struct {
-			ProductSearch struct {
-				Products json.RawMessage `json:"products"`
-				Page     struct {
-					TotalElements int `json:"totalElements"`
-				} `json:"page"`
-			} `json:"productSearch"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, 0, fmt.Errorf("parse error: %w", err)
-	}
-	return result.Data.ProductSearch.Products, result.Data.ProductSearch.Page.TotalElements, nil
 }
 
 // getBonusProducts fetches current bonus products via REST
@@ -609,120 +549,6 @@ const successPage = `<!DOCTYPE html>
 </div>
 </body>
 </html>`
-
-// graphqlQuery executes a GraphQL query and returns the raw response body
-func graphqlQuery(ctx context.Context, client *appie.Client, query string) ([]byte, error) {
-	reqBody, _ := json.Marshal(map[string]string{"query": query})
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.ah.nl/graphql", bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+client.AccessToken())
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-client-name", "appie-ios")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("API error: %d %s", resp.StatusCode, string(body))
-	}
-	return body, nil
-}
-
-// searchRecipes searches Allerhande recipes via GraphQL
-func searchRecipes(ctx context.Context, client *appie.Client, query string, size int) (json.RawMessage, error) {
-	gql := fmt.Sprintf(`{
-		recipeSearch(query: { query: %q, size: %d }) {
-			result {
-				id
-				title
-				slug
-				cookTime
-				images {
-					rendition { url }
-				}
-			}
-			page { totalElements totalPages }
-		}
-	}`, query, size)
-
-	body, err := graphqlQuery(ctx, client, gql)
-	if err != nil {
-		return nil, err
-	}
-
-	var result struct {
-		Data struct {
-			RecipeSearch json.RawMessage `json:"recipeSearch"`
-		} `json:"data"`
-		Errors json.RawMessage `json:"errors"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("parse error: %w\nraw: %s", err, string(body))
-	}
-	if result.Errors != nil {
-		return nil, fmt.Errorf("GraphQL errors: %s", string(result.Errors))
-	}
-	return result.Data.RecipeSearch, nil
-}
-
-// getRecipe fetches a single recipe with full details via GraphQL
-func getRecipe(ctx context.Context, client *appie.Client, id int) (json.RawMessage, error) {
-	gql := fmt.Sprintf(`{
-		recipe(id: %d) {
-			id
-			title
-			slug
-			description
-			cookTime
-			prepTime
-			servings
-			tags
-			ingredients {
-				text
-				quantity
-				name { singular plural }
-				unit { singular plural }
-			}
-			steps {
-				text
-				index
-			}
-			nutritions {
-				name
-				value
-				unit
-			}
-			images {
-				rendition { url }
-			}
-		}
-	}`, id)
-
-	body, err := graphqlQuery(ctx, client, gql)
-	if err != nil {
-		return nil, err
-	}
-
-	var result struct {
-		Data struct {
-			Recipe json.RawMessage `json:"recipe"`
-		} `json:"data"`
-		Errors json.RawMessage `json:"errors"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("parse error: %w\nraw: %s", err, string(body))
-	}
-	if result.Errors != nil {
-		return nil, fmt.Errorf("GraphQL errors: %s", string(result.Errors))
-	}
-	return result.Data.Recipe, nil
-}
 
 func fatal(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)

@@ -27,4 +27,4 @@ else
 fi
 
 echo ""
-echo "🔐 Next: run 'appie-cli login-url' to authenticate with Albert Heijn"
+echo "🔐 Next: run 'appie-cli login' to authenticate with Albert Heijn"

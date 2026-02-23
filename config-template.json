@@ -1,27 +1,14 @@
 {
-  "_comment": "Copy this to config.json and adjust to your preferences",
-
-  "meals_per_week": 3,
-  "max_cooking_time_minutes": 30,
-  "household_size": 2,
+  "_comment": "Copy to config.json and adjust for your AH + Picnic comparison workflow",
   "shopping_day": "friday",
-  "proposal_day": "thursday",
-  "proposal_time": "09:00",
-
+  "household_size": 2,
   "preferences": {
-    "healthy": true,
     "prefer_bonus": true,
-    "prefer_seasonal": true,
-    "budget_conscious": false
+    "prefer_cheapest_total": true,
+    "allow_split_order": true
   },
-
-  "dislikes": [],
-  "allergies": [],
-
-  "butcher_items": [],
-
-  "cuisine_preferences": {
-    "liked": [],
-    "disliked": []
+  "store_overrides": {
+    "always_ah": [],
+    "always_picnic": []
   }
 }
