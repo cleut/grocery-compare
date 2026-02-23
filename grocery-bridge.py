@@ -335,12 +335,95 @@ def build_compare_report(ah_data, picnic_data, picnic_unit):
     }
 
 
-def read_items(path):
-    with open(path, "r", encoding="utf-8") as handle:
-        data = json.load(handle)
+def parse_items_payload(data, source):
     if not isinstance(data, list):
-        raise BridgeError("invalid_items_file", payload={"error": "Items file must be a JSON array"})
+        raise BridgeError(
+            "invalid_items_payload",
+            payload={
+                "error": "invalid_items_payload",
+                "detail": f"Expected JSON array for {source}",
+                "hint": "Provide an array like [{\"name\": \"bananen\", \"qty\": 1}]",
+            },
+        )
     return [normalize_item(item) for item in data]
+
+
+def read_items_from_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except FileNotFoundError:
+        raise BridgeError(
+            "missing_items_file",
+            payload={
+                "error": "missing_items_file",
+                "detail": f"File not found: {path}",
+                "hint": "Create the file first, or use --items-json / --items-stdin",
+            },
+        )
+    except json.JSONDecodeError as exc:
+        raise BridgeError(
+            "invalid_items_json",
+            payload={
+                "error": "invalid_items_json",
+                "detail": f"Invalid JSON in {path}: {exc}",
+                "hint": "Fix JSON syntax or use --items-json / --items-stdin",
+            },
+        )
+    except OSError as exc:
+        raise BridgeError(
+            "items_file_read_error",
+            payload={
+                "error": "items_file_read_error",
+                "detail": str(exc),
+            },
+        )
+    return parse_items_payload(data, f"file '{path}'")
+
+
+def read_items_from_inline_json(raw_json, source):
+    try:
+        data = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        raise BridgeError(
+            "invalid_items_json",
+            payload={
+                "error": "invalid_items_json",
+                "detail": f"Invalid JSON for {source}: {exc}",
+                "hint": "Example: --items-json '[{\"name\":\"bananen\",\"qty\":1}]'",
+            },
+        )
+    return parse_items_payload(data, source)
+
+
+def read_items_from_stdin():
+    raw = sys.stdin.read()
+    if not raw.strip():
+        raise BridgeError(
+            "empty_stdin",
+            payload={
+                "error": "empty_stdin",
+                "detail": "No input received on stdin",
+                "hint": "Pipe JSON array to stdin, for example: echo '[{\"name\":\"bananen\",\"qty\":1}]' | ... --items-stdin",
+            },
+        )
+    return read_items_from_inline_json(raw, "stdin")
+
+
+def read_items_from_args(args):
+    if getattr(args, "items_file", None):
+        return read_items_from_file(args.items_file)
+    if getattr(args, "items_json", None):
+        return read_items_from_inline_json(args.items_json, "--items-json")
+    if getattr(args, "items_stdin", False):
+        return read_items_from_stdin()
+    raise BridgeError(
+        "missing_items_input",
+        payload={
+            "error": "missing_items_input",
+            "detail": "Provide one of --items-file, --items-json, or --items-stdin",
+        },
+    )
 
 
 def score_name_similarity(query_name, candidate_name):
@@ -778,7 +861,7 @@ def cmd_search_both(args, paths):
 
 
 def cmd_match_items(args, paths, config):
-    items = read_items(args.items_file)
+    items = read_items_from_args(args)
     result = match_items(
         items,
         paths,
@@ -794,7 +877,7 @@ def cmd_add_both(args, paths, config):
     if not args.yes and not args.dry_run:
         raise BridgeError("confirmation_required", payload={"error": "Mutating command requires --yes"})
 
-    items = read_items(args.items_file)
+    items = read_items_from_args(args)
 
     if args.auto_match:
         match_result = match_items(
@@ -933,12 +1016,18 @@ def build_parser():
     search_parser.add_argument("--limit", type=int, default=5, help="Results per store")
 
     match_parser = subparsers.add_parser("match-items", help="Auto-match plain grocery names to both stores")
-    match_parser.add_argument("--items-file", required=True, help="JSON array with items")
+    match_items_input = match_parser.add_mutually_exclusive_group(required=True)
+    match_items_input.add_argument("--items-file", help="JSON array file with items")
+    match_items_input.add_argument("--items-json", help="Inline JSON array with items")
+    match_items_input.add_argument("--items-stdin", action="store_true", help="Read JSON array from stdin")
     match_parser.add_argument("--search-limit", type=int, help="Override configured search limit")
     match_parser.add_argument("--no-cache", action="store_true", help="Disable match-cache reads/writes")
 
     add_parser = subparsers.add_parser("add-both", help="Add items to AH and Picnic carts")
-    add_parser.add_argument("--items-file", required=True, help="JSON array with items")
+    add_items_input = add_parser.add_mutually_exclusive_group(required=True)
+    add_items_input.add_argument("--items-file", help="JSON array file with items")
+    add_items_input.add_argument("--items-json", help="Inline JSON array with items")
+    add_items_input.add_argument("--items-stdin", action="store_true", help="Read JSON array from stdin")
     add_parser.add_argument("--yes", action="store_true", help="Confirm cart mutations")
     add_parser.add_argument("--dry-run", action="store_true", help="Show planned actions only")
     add_parser.add_argument("--auto-match", action="store_true", help="Auto-match names to both stores before adding")

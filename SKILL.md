@@ -130,8 +130,8 @@ Albert Heijn:
 - For cart comparison and checkout planning, prefer the AH order cart:
 
 ```bash
-python3 grocery-bridge.py --config config.json match-items --items-file items.json
-python3 grocery-bridge.py --config config.json add-both --items-file items.json --auto-match --yes
+python3 grocery-bridge.py --config config.json match-items --items-json '[{"name":"Halfvolle melk","qty":2}]'
+python3 grocery-bridge.py --config config.json add-both --items-json '[{"name":"Halfvolle melk","qty":2}]' --auto-match --yes
 python3 grocery-bridge.py --config config.json cart-both
 ```
 
@@ -177,8 +177,8 @@ Use `config.json` -> `matching` to tune strict match thresholds and cache TTL.
 | Command | What it does |
 |---------|-------------|
 | `search-both <query> [--limit N]` | Search AH and Picnic in one call |
-| `match-items --items-file <file>` | Resolve plain names to AH/Picnic IDs with confidence |
-| `add-both --items-file <file> --auto-match --yes` | Add only when all items match with high confidence |
+| `match-items (--items-file|--items-json|--items-stdin)` | Resolve plain names to AH/Picnic IDs with confidence |
+| `add-both (--items-file|--items-json|--items-stdin) --auto-match --yes` | Add only when all items match with high confidence |
 | `cart-both` | Return both carts |
 | `compare-checkout [--picnic-unit cents|eur]` | Compare totals and recommend checkout app |
 

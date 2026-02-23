@@ -82,6 +82,13 @@ python3 grocery-bridge.py --config config.json add-both --items-file items.json 
 python3 grocery-bridge.py --config config.json compare-checkout
 ```
 
+Agent-friendly flow (no temp files):
+
+```bash
+python3 grocery-bridge.py --config config.json match-items --items-json '[{"name":"Halfvolle melk","qty":2},{"name":"Bananen","qty":1}]'
+python3 grocery-bridge.py --config config.json add-both --items-json '[{"name":"Halfvolle melk","qty":2},{"name":"Bananen","qty":1}]' --auto-match --yes
+```
+
 `items.json` example:
 
 ```json
@@ -107,8 +114,8 @@ Global options:
 
 Commands:
   search-both <query> [--limit 5]              Search AH and Picnic
-  match-items --items-file items.json           Resolve item names to AH/Picnic product IDs
-  add-both --items-file items.json [--auto-match] [--yes]  Add products to both carts
+  match-items (--items-file f | --items-json j | --items-stdin)  Resolve names to AH/Picnic IDs
+  add-both (--items-file f | --items-json j | --items-stdin) [--auto-match] [--yes]  Add products to both carts
   cart-both                                    Fetch both carts
   compare-checkout [--picnic-unit cents|eur]   Compare totals and recommend checkout app
 ```
